@@ -143,28 +143,28 @@ CORS_ALLOW_HEADERS = [
 # --------------------------------------------------
 
 #MYSQL CONFIG
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'aisearch',
-        'USER': 'root',
-        'PASSWORD': 'mysql',
-        'HOST': 'localhost',
-        'PORT': '3306',
-    }
-}
-
-#POSTGRES CONFIG
 # DATABASES = {
 #     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'AI_Search',
-#         'USER': 'postgres',
-#         'PASSWORD': 'Sujith@8267',
+#         'ENGINE': 'django.db.backends.mysql',
+#         'NAME': 'aisearch',
+#         'USER': 'root',
+#         'PASSWORD': 'mysql',
 #         'HOST': 'localhost',
-#         'PORT': '5432',
+#         'PORT': '3306',
 #     }
 # }
+
+#POSTGRES CONFIG
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'AI_Search',
+        'USER': 'postgres',
+        'PASSWORD': 'Sujith@8267',
+        'HOST': 'localhost',
+        'PORT': '5432',
+    }
+}
 
 # --------------------------------------------------
 # PASSWORD VALIDATION
