@@ -18,7 +18,6 @@ ALLOWED_HOSTS = [
     "127.0.0.1",
     "xpg4jlf7-8000.inc1.devtunnels.ms",  # devtunnel hostZ
 ]
-ALLOWED_HOSTS = ['*']
 
 # --------------------------------------------------
 # INSTALLED APPS
