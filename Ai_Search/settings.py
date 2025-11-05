@@ -139,8 +139,10 @@ CORS_ALLOW_HEADERS = [
 ]
 
 # --------------------------------------------------
-# DATABASE
+# DATABASE MYSQL AND POSTGRES CONFIG
 # --------------------------------------------------
+
+#MYSQL CONFIG
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
@@ -151,6 +153,18 @@ DATABASES = {
         'PORT': '3306',
     }
 }
+
+#POSTGRES CONFIG
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'AI_Search',
+#         'USER': 'postgres',
+#         'PASSWORD': 'Sujith@8267',
+#         'HOST': 'localhost',
+#         'PORT': '5432',
+#     }
+# }
 
 # --------------------------------------------------
 # PASSWORD VALIDATION
