@@ -1070,3 +1070,250 @@ def get_all_institutions(request):
             "message": f"Failed to fetch institutions: {str(e)}"
         }, status=500)
     
+
+
+
+# --------------------------------------------------------
+# 1. Existing Course Search API (/api/search/)
+#    Users Knows Course Name and Location
+# --------------------------------------------------------
+@csrf_exempt
+@require_http_methods(["POST"])
+def search_courses(request):
+    try:
+        instituition_data = load_institution_data()  # ✅ Fetch data from DB
+
+        body = json.loads(request.body.decode("utf-8"))
+        search_course = str(body.get("course", "")).strip()
+        search_location = normalize(body.get("location", ""))
+        search_min_fee = body.get("min_fee", None)
+        search_max_fee = body.get("max_fee", None)
+        search_duration = body.get("duration", "").strip()
+
+        import re
+
+        # ---------- Helpers ----------
+        def within_fee_range(course, min_fee, max_fee):
+            if not min_fee and not max_fee:
+                return True
+            fee = course.get("fee")
+            if fee is None:
+                return False
+            try:
+                fee = float(fee)
+            except:
+                return False
+            if min_fee and fee < float(min_fee):
+                return False
+            if max_fee and fee > float(max_fee):
+                return False
+            return True
+
+        def duration_matches(course_duration, user_duration):
+            if not user_duration:
+                return True
+            course_months = re.findall(r'\d+', str(course_duration))
+            user_months = re.findall(r'\d+', str(user_duration))
+            if course_months and user_months:
+                return int(course_months[0]) == int(user_months[0])
+            return False
+
+        def course_or_keyword_matches(user_input, course_obj):
+            """Check if user input matches course name or any of its keywords"""
+            if not user_input:
+                return True
+            ui = user_input.lower()
+            cname = str(course_obj.get("name", "")).lower()
+            keywords = [k.lower() for k in course_obj.get("keywords", [])]
+            return (ui in cname) or any(ui in kw for kw in keywords)
+        
+        def clean_text(text):
+            text = text.lower()
+            # Remove filler words and numbers to normalize course titles
+            text = re.sub(r'\b(\d+|days?|course|crash|program|training|of|in|for|the)\b', '', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            return text
+
+        def match_courses(dataset, search_course):
+            cleaned_search = clean_text(search_course)
+            keywords = cleaned_search.split()
+            matches = []
+            for item in dataset:
+                course_name = item['course'].lower()
+                if any(kw in course_name for kw in keywords) or cleaned_search in course_name:
+                    matches.append(item)
+            return matches
+
+        # ---------- 1️⃣ Strict Matches ----------
+        strict_matches = []
+        for inst in instituition_data:
+            inst_loc_text = inst_location_text(inst)
+
+            if search_location and search_location not in inst_loc_text:
+                continue
+
+            for c in inst.get("courses", []):
+                if (course_or_keyword_matches(search_course, c)
+                    and within_fee_range(c, search_min_fee, search_max_fee)
+                    and duration_matches(c.get("duration", ""), search_duration)):
+                    strict_matches.append(make_result_item(inst, c))
+
+        if strict_matches:
+            return JsonResponse({
+                "status": "results",
+                "message": "Here are the Courses.",
+                "matches": sort_results(strict_matches)
+            }, safe=False)
+
+        # ---------- 2️⃣ Suggestions (if strict not found) ----------
+        related = []
+        for inst in instituition_data:
+            inst_loc_text = inst_location_text(inst)
+            if search_location and search_location not in inst_loc_text:
+                continue
+
+            for c in inst.get("courses", []):
+                if course_or_keyword_matches(search_course, c):
+                    related.append(make_result_item(inst, c))
+
+        if related:
+            return JsonResponse({
+                "status": "suggestions",
+                "message": "No exact match found - Here are some recommended courses.",
+                "matches": sort_results(related)[:15]
+            }, safe=False)
+
+        # ---------- 3️⃣ Gemini AI Suggestions ----------
+        if GEMINI_API_KEY:
+            try:
+                model = GenerativeModel("gemini-2.0-flash")
+
+                small_dataset = [
+                    {
+                        "name": i["name"],
+                        "location": i.get("city") or i.get("location"),
+                        "courses": [
+                            {
+                                "name": c["name"],
+                                "keywords": c.get("keywords", []),
+                                "description": c.get("description", ""),
+                                "fee": c.get("fee"),
+                                "duration": c.get("duration", ""),
+                                "mode": c.get("mode", "offline")
+                            }
+                            for c in i.get("courses", [])
+                        ]
+                    }
+                    for i in instituition_data[:200]
+                ]
+
+                flat_dataset = []
+                for inst in small_dataset:
+                    for c in inst["courses"]:
+                        flat_dataset.append({
+                            "institute": inst["name"],
+                            "course": c["name"],
+                            "keywords": c.get("keywords", []),
+                            "description": c.get("description", ""),
+                            "fee": c.get("fee"),
+                            "duration": c.get("duration", ""),
+                            "location": inst.get("location"),
+                            "mode": c.get("mode", "offline")
+                        })
+
+                # Pre-filter by keywords using helper
+                keyword_filtered = match_courses(flat_dataset, search_course)
+
+                prompt = f"""
+                We have this dataset (in JSON format): {json.dumps(small_dataset)}  
+
+The user provided the following input:  
+- Course name: "{search_course}"  
+- Location: "{search_location}"  
+- Minimum fee: "{search_min_fee}"  
+- Maximum fee: "{search_max_fee}"  
+- Duration: "{search_duration}"  
+
+🎯 **Task Description:**
+Analyze the dataset and perform the following steps:
+
+1️⃣ **Exact Course Match:**  
+   - Find all courses whose *name* exactly matches the user’s course name (case-insensitive).  
+   - These courses must also satisfy the following filters (if provided):  
+     - Location matches or includes the user’s location.  
+     - Fee is between the user’s min and max range.  
+     - Duration matches numerically with the user’s input.  
+
+2️⃣ **Keyword-Based Match (Enhanced):**  
+   - After collecting exact matches, also find *related* courses where the course name **or its keywords** share significant overlap with the user’s input (case-insensitive).  
+   - Before matching, ignore or strip out common filler words like:  
+     `"course"`, `"crash"`, `"program"`, `"training"`, `"of"`, `"in"`, `"for"`, `"the"`, `"days"`, or any numbers (e.g., “100 days of crash course Digital Marketing” → “Digital Marketing”).  
+   - Consider partial or fuzzy keyword matches when any meaningful keyword or phrase overlaps (e.g., “digital marketing” in “100 days of crash course digital marketing”).  
+   - Apply the same filters (location, fee, duration).  
+   - Avoid duplicates — if a course already appears as an exact match, don’t include it again.
+
+3️⃣ **Merging Results:**  
+   - Combine exact matches and keyword-based matches into a single `"matches"` list.  
+   - Exact matches should appear **first**, followed by keyword-related matches.
+
+4️⃣ **If No Matches Found:**  
+   - Suggest relevant courses that are conceptually or topically similar to the user’s input course name or keywords.  
+   - Focus on courses that share related keywords, subjects, or categories even if location, fee, or duration don’t match perfectly.  
+   - In this case, return the `"status": "suggestions"`.
+
+Each returned course item must include:
+- "institute"
+- "course"
+- "fee"
+- "duration"
+- "location"
+- "mode"
+- "description"
+- "reason"
+
+The `"reason"` should briefly explain **why** the course is shown (e.g., “Exact course name match”, “Keyword match: digital marketing”, or “Suggested based on related topic”).
+
+Return a **strictly valid JSON** object with this structure:
+{
+  "status": "results" or "suggestions",
+  "message": "Here are the Courses." or "No exact match found - Here are some recommended courses.",
+  "matches": [ ... ]
+}
+
+⚠️ Do not include markdown formatting, text outside JSON, or code fences.
+
+"""
+
+                response = generate_with_retry(model, prompt)
+                ai_text = response.candidates[0].content.parts[0].text.strip()
+
+                if ai_text.startswith("```json"):
+                    ai_text = ai_text[len("```json"):].strip()
+                elif ai_text.startswith("```"):
+                    ai_text = ai_text[len("```"):].strip()
+                if ai_text.endswith("```"):
+                    ai_text = ai_text[:-3].strip()
+
+                parsed = json.loads(ai_text)
+                if parsed.get("status") and isinstance(parsed.get("matches"), list):
+                    return JsonResponse(parsed, safe=False)
+
+            except Exception as e:
+                print("⚠️ Gemini AI error:", e)
+
+        # ---------- 4️⃣ Fallback ----------
+        all_courses_flat = []
+        for inst in instituition_data:
+            for c in inst.get("courses", []):
+                all_courses_flat.append(make_result_item(inst, c))
+
+        fallback = sort_results(all_courses_flat)[:10]
+        return JsonResponse({
+            "status": "fallback",
+            "message": "No results or suggestions found. Showing general popular courses.",
+            "matches": fallback
+        }, safe=False)
+
+    except Exception as e:
+        print("❌ Error in /api/search-courses:", str(e))
+        return JsonResponse({"error": "Internal server error"}, status=500)
