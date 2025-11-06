@@ -1074,6 +1074,105 @@ def get_all_institutions(request):
 
 
 # --------------------------------------------------------
+# AI Search Things. The Users have knows every course details and dont know which course to take
+
+load_dotenv()
+
+# Load Gemini API key
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    configure(api_key=GEMINI_API_KEY)
+
+# ---------------------------
+# Helper functions
+# ---------------------------
+def normalize(s=""):
+    return str(s).strip().lower()
+
+def parse_duration_to_months(d):
+    if d is None:
+        return None
+    if isinstance(d, int):
+        return d
+    num = ''.join([c for c in str(d) if c.isdigit()])
+    return int(num) if num.isdigit() else None
+
+def course_name_matches(search_course, course_obj):
+    if not search_course:
+        return True
+    q = normalize(search_course)
+    name = normalize(course_obj.get("name", ""))
+
+    if q in name:
+        return True
+
+    keywords = course_obj.get("keywords", [])
+    if any(q in normalize(k) for k in keywords):
+        return True
+
+    q_parts = [p for p in q.split() if p]
+    return all(p in name or any(p in normalize(k) for k in keywords) for p in q_parts)
+
+def inst_location_text(inst):
+    return normalize(inst.get("location") or inst.get("city") or inst.get("address", ""))
+
+def make_result_item(inst, course_obj):
+    return {
+        "institute": inst["name"],
+        "course": course_obj["name"],
+        "fee": course_obj.get("fee"),
+        "duration": course_obj.get("duration"),
+        "location": inst.get("city") or inst.get("location"),
+        "description": course_obj.get("description", ""),
+        "mode": course_obj.get("mode", "offline"),
+        "reason": ""
+    }
+
+
+def sort_results(arr):
+    return sorted(
+        arr,
+        key=lambda x: (x.get("fee") or float('inf'))
+    )
+
+def generate_with_retry(model, prompt, retries=3, delay=2.0):
+    for i in range(retries):
+        try:
+            return model.generate_content(prompt)
+        except Exception as e:
+            if i == retries - 1:
+                raise e
+            print(f"Gemini retry {i + 1}: {e}")
+            time.sleep(delay)
+
+
+# ✅ Replace hardcoded JSON with database fetch
+def load_institution_data():
+    from courses.models import Institute  # prevent circular import
+    institutions = []
+    for inst in Institute.objects.prefetch_related("courses").all():
+        institutions.append({
+            "name": inst.name,
+            "city": getattr(inst, "city", None),
+            "location": getattr(inst, "location", None),
+            "courses": [
+                {
+                    "name": c.name,
+                    "keywords": c.keywords or [],
+                    "fee": c.fee,
+                    "duration": c.duration,
+                    "description": getattr(c, "description", ""),
+                    "mode": getattr(c, "mode", "")
+                } for c in inst.courses.all()
+            ]
+        })
+    return institutions
+
+
+
+
+
+# --------------------------------------------------------
 # 1. Existing Course Search API (/api/search/)
 #    Users Knows Course Name and Location
 # --------------------------------------------------------
