@@ -1370,16 +1370,29 @@ Each returned course item must include:
 - "description"
 - "reason"
 
-The `"reason"` should briefly explain **why** the course is shown (e.g., “Exact course name match”, “Keyword match: digital marketing”, or “Suggested based on related topic”).
+You must choose only from this dataset — do not create new courses.
 
-Return a **strictly valid JSON** object with this structure:
-{
-  "status": "results" or "suggestions",
-  "message": "Here are the Courses." or "No exact match found - Here are some recommended courses.",
-  "matches": [ ... ]
-}
+For each recommended course, generate a clear and detailed reason explaining:
+1. How the user's qualification relates to the course prerequisites.
+2. How the user's interests align with the course content or skills taught.
+3. Check the keywords is matchs to the users inputs then shows that course also.
 
-⚠️ Do not include markdown formatting, text outside JSON, or code fences.
+Return valid JSON in this format:
+{{
+  "status": "recommendations",
+  "matches": [
+    {{
+      "institute": "Institute Name",
+      "course": "Course Name",
+      "fee": 0,
+      "duration": "Duration",
+      "location": "City",
+      "mode": "online|offline|hybrid",
+      "description": "Course description",
+      "reason": "Explain why this course fits the user's qualification and interests."
+    }}
+  ]
+}}
 
 """
 
