@@ -30,6 +30,4 @@ urlpatterns = [
     path("recommend/", views.recommend_courses, name="recommend_courses"),
     path("course-names/", views.get_course_names, name="get_course_names"),
     path("institutions-courses/", views.get_all_institutions, name="list_institutions_with_courses"),
-    path("search/", views.search_courses, name="search_courses"),
-
 ]
